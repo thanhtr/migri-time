@@ -62,6 +62,10 @@ WEEKLY_TOP_N      = 5
 SCHEDULING_BODY   = {"serviceSelections": [{"values": [SERVICE_ID]}], "extraServices": []}
 SCHEDULING_PARAMS = {"start_hours": 0, "end_hours": 23, "max_amount": 24}
 
+# Slot filters — only store, display, and notify for slots matching both criteria
+FILTER_MAX_DISTANCE_KM = 176                        # ≤ Helsinki, Lahti, Turku, Tampere
+FILTER_BEFORE_DATE     = datetime.date(2026, 7, 7)  # exclusive upper bound
+
 NOTIFICATION_TITLE = "Migri Citizenship Appointment"
 NOTIFICATION_SOUND = "Glass"
 
@@ -259,6 +263,18 @@ def rank_slots(data: dict) -> list[tuple[float, datetime.datetime, str, int]]:
     return sorted(results)
 
 
+def apply_filters(
+    ranked: list[tuple[float, datetime.datetime, str, int]],
+) -> list[tuple[float, datetime.datetime, str, int]]:
+    """Keep only slots within FILTER_MAX_DISTANCE_KM and before FILTER_BEFORE_DATE."""
+    cutoff = datetime.datetime.combine(FILTER_BEFORE_DATE, datetime.time.min)
+    return [
+        (score, dt, office, dist)
+        for score, dt, office, dist in ranked
+        if dist <= FILTER_MAX_DISTANCE_KM and dt < cutoff
+    ]
+
+
 # ── Offices & weekly scan ─────────────────────────────────────────────────────
 
 def fetch_offices(
@@ -425,6 +441,7 @@ def write_slots_file(
 
     lines = [
         f"Migri citizenship appointments — last checked {now}",
+        f"Filters: ≤ {FILTER_MAX_DISTANCE_KM} km from Helsinki  |  before {FILTER_BEFORE_DATE}",
         f"Score = days_until + dist_km / {DISTANCE_WEIGHT}  (lower is better)",
         "",
         "=== Upcoming (all offices) ===",
@@ -494,9 +511,9 @@ def main() -> None:
                 time.sleep(CHECK_INTERVAL_SECONDS)
                 continue
 
-        # ② Fetch upcoming slots (all offices)
+        # ② Fetch upcoming slots and apply filters
         try:
-            ranked = check_upcoming(http, session_id)
+            ranked = apply_filters(check_upcoming(http, session_id))
         except SessionExpiredError:
             log("WARN", "SESSION", "Token expired, re-authenticating")
             session_id = None
@@ -506,9 +523,13 @@ def main() -> None:
             time.sleep(CHECK_INTERVAL_SECONDS)
             continue
 
-        # ③ Weekly scan — top 5 closest offices
+        # ③ Weekly scan — top 5 closest offices, then apply filters
         try:
             w_dt, w_office, w_dist = scan_weekly_closest(http, session_id)
+            if w_dt is not None:
+                _cutoff = datetime.datetime.combine(FILTER_BEFORE_DATE, datetime.time.min)
+                if w_dist > FILTER_MAX_DISTANCE_KM or w_dt >= _cutoff:
+                    w_dt, w_office, w_dist = None, None, None
         except SessionExpiredError:
             log("WARN", "SESSION", "Token expired during weekly scan, re-authenticating")
             session_id = None
