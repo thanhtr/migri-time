@@ -63,11 +63,12 @@ SCHEDULING_BODY   = {"serviceSelections": [{"values": [SERVICE_ID]}], "extraServ
 SCHEDULING_PARAMS = {"start_hours": 0, "end_hours": 23, "max_amount": 24}
 
 # Slot filters — only store, display, and notify for slots matching both criteria
-FILTER_MAX_DISTANCE_KM = 176                        # ≤ Helsinki, Lahti, Turku, Tampere
-FILTER_BEFORE_DATE     = datetime.date(2026, 7, 7)  # exclusive upper bound
+FILTER_OFFICE_SUBSTRING = "malmi"                   # case-insensitive office name match
+FILTER_BEFORE_DATE      = datetime.date(2026, 7, 1) # exclusive upper bound
 
 NOTIFICATION_TITLE = "Migri Citizenship Appointment"
 NOTIFICATION_SOUND = "Glass"
+NTFY_TOPIC         = "migri-tung-7x4k"   # ntfy.sh topic for phone push notifications
 
 BASE_HEADERS = {
     "User-Agent": (
@@ -146,6 +147,23 @@ def notify(title: str, message: str, open_file: "str | None" = None) -> None:
         subprocess.run(["osascript", "-e", script], timeout=5, check=False)
     except Exception as e:
         log("WARN", "NOTIFY", f"osascript failed: {e}")
+
+    # Phone push via ntfy.sh
+    if NTFY_TOPIC:
+        try:
+            requests.post(
+                f"https://ntfy.sh/{NTFY_TOPIC}",
+                data=message.encode("utf-8"),
+                headers={
+                    "Title":    title,
+                    "Priority": "high",
+                    "Tags":     "calendar",
+                    "Click":    "https://migri.vihta.com/public/migri/#/reservation",
+                },
+                timeout=5,
+            )
+        except Exception as e:
+            log("WARN", "NOTIFY", f"ntfy push failed: {e}")
 
 
 # ── Session ───────────────────────────────────────────────────────────────────
@@ -266,12 +284,12 @@ def rank_slots(data: dict) -> list[tuple[float, datetime.datetime, str, int]]:
 def apply_filters(
     ranked: list[tuple[float, datetime.datetime, str, int]],
 ) -> list[tuple[float, datetime.datetime, str, int]]:
-    """Keep only slots within FILTER_MAX_DISTANCE_KM and before FILTER_BEFORE_DATE."""
+    """Keep only slots at a Malmi office and before FILTER_BEFORE_DATE."""
     cutoff = datetime.datetime.combine(FILTER_BEFORE_DATE, datetime.time.min)
     return [
         (score, dt, office, dist)
         for score, dt, office, dist in ranked
-        if dist <= FILTER_MAX_DISTANCE_KM and dt < cutoff
+        if FILTER_OFFICE_SUBSTRING in office.lower() and dt < cutoff
     ]
 
 
@@ -441,7 +459,7 @@ def write_slots_file(
 
     lines = [
         f"Migri citizenship appointments — last checked {now}",
-        f"Filters: ≤ {FILTER_MAX_DISTANCE_KM} km from Helsinki  |  before {FILTER_BEFORE_DATE}",
+        f"Filters: Malmi office only  |  before {FILTER_BEFORE_DATE}",
         f"Score = days_until + dist_km / {DISTANCE_WEIGHT}  (lower is better)",
         "",
         "=== Upcoming (all offices) ===",
@@ -528,7 +546,7 @@ def main() -> None:
             w_dt, w_office, w_dist = scan_weekly_closest(http, session_id)
             if w_dt is not None:
                 _cutoff = datetime.datetime.combine(FILTER_BEFORE_DATE, datetime.time.min)
-                if w_dist > FILTER_MAX_DISTANCE_KM or w_dt >= _cutoff:
+                if FILTER_OFFICE_SUBSTRING not in (w_office or "").lower() or w_dt >= _cutoff:
                     w_dt, w_office, w_dist = None, None, None
         except SessionExpiredError:
             log("WARN", "SESSION", "Token expired during weekly scan, re-authenticating")
