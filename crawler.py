@@ -19,7 +19,7 @@ import time
 import requests
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-CHECK_INTERVAL_SECONDS = 60 * 60   # how often to poll (default: every hour)
+CHECK_INTERVAL_SECONDS = 15 * 60   # how often to poll (every 15 minutes)
 MAX_RETRIES            = 3
 RETRY_BASE_DELAY       = 2         # seconds; delay = BASE ** attempt
 RETRY_MAX_DELAY        = 60
