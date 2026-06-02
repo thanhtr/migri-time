@@ -2,7 +2,7 @@ name: Migri slot check
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '0 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -14,6 +14,12 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install requests
-      - run: python3 crawler.py --once
+      - name: Check slots every 5 min for 1 hour
+        run: |
+          for i in $(seq 1 12); do
+            echo "--- Check $i/12 ---"
+            python3 crawler.py --once
+            if [ "$i" -lt 12 ]; then sleep 300; fi
+          done
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
