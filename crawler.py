@@ -115,10 +115,9 @@ def _terminal_notifier_available() -> bool:
 
 def notify(title: str, message: str, open_file: "str | None" = None) -> None:
     """
-    Send a macOS notification.
-    If terminal-notifier is installed and open_file is given, clicking opens that file.
-    Falls back to osascript otherwise.
+    Always sends both a macOS desktop notification and a phone push via ntfy.sh.
     """
+    # macOS — terminal-notifier (clickable) or osascript fallback
     if open_file and _terminal_notifier_available():
         file_url = f"file://{os.path.abspath(open_file)}"
         try:
@@ -132,23 +131,22 @@ def notify(title: str, message: str, open_file: "str | None" = None) -> None:
                 ],
                 timeout=5, check=False,
             )
-            return
         except Exception as e:
             log("WARN", "NOTIFY", f"terminal-notifier failed: {e}")
+    else:
+        safe_msg   = message.replace("\\", "\\\\").replace('"', '\\"')
+        safe_title = title.replace("\\", "\\\\").replace('"', '\\"')
+        script = (
+            f'display notification "{safe_msg}" '
+            f'with title "{safe_title}" '
+            f'sound name "{NOTIFICATION_SOUND}"'
+        )
+        try:
+            subprocess.run(["osascript", "-e", script], timeout=5, check=False)
+        except Exception as e:
+            log("WARN", "NOTIFY", f"osascript failed: {e}")
 
-    safe_msg   = message.replace("\\", "\\\\").replace('"', '\\"')
-    safe_title = title.replace("\\", "\\\\").replace('"', '\\"')
-    script = (
-        f'display notification "{safe_msg}" '
-        f'with title "{safe_title}" '
-        f'sound name "{NOTIFICATION_SOUND}"'
-    )
-    try:
-        subprocess.run(["osascript", "-e", script], timeout=5, check=False)
-    except Exception as e:
-        log("WARN", "NOTIFY", f"osascript failed: {e}")
-
-    # Phone push via ntfy.sh
+    # Phone push via ntfy.sh (always fires)
     if NTFY_TOPIC:
         try:
             requests.post(
