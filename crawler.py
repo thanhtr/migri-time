@@ -64,11 +64,11 @@ SCHEDULING_PARAMS = {"start_hours": 0, "end_hours": 23, "max_amount": 24}
 
 # Slot filters — only store, display, and notify for slots matching both criteria
 FILTER_OFFICE_SUBSTRING = "malmi"                   # case-insensitive office name match
-FILTER_BEFORE_DATE      = datetime.date(2026, 7, 1) # exclusive upper bound
+FILTER_BEFORE_DATE      = datetime.date(2026, 7, 7) # exclusive upper bound
 
 NOTIFICATION_TITLE = "Migri Citizenship Appointment"
 NOTIFICATION_SOUND = "Glass"
-NTFY_TOPIC         = "migri-tung-7x4k"   # ntfy.sh topic for phone push notifications
+NTFY_TOPIC         = os.environ.get("NTFY_TOPIC", "migri-tung-7x4k")
 
 BASE_HEADERS = {
     "User-Agent": (
@@ -113,9 +113,15 @@ def _terminal_notifier_available() -> bool:
         return False
 
 
-def notify(title: str, message: str, open_file: "str | None" = None) -> None:
+def notify(
+    title: str,
+    message: str,
+    open_file: "str | None" = None,
+    ntfy_id: "str | None" = None,
+) -> None:
     """
-    Always sends both a macOS desktop notification and a phone push via ntfy.sh.
+    Sends a macOS desktop notification (when available) and a phone push via ntfy.sh.
+    ntfy_id is used as X-ID for deduplication — same ID won't re-notify within 24 h.
     """
     # macOS — terminal-notifier (clickable) or osascript fallback
     if open_file and _terminal_notifier_available():
@@ -149,15 +155,18 @@ def notify(title: str, message: str, open_file: "str | None" = None) -> None:
     # Phone push via ntfy.sh (always fires)
     if NTFY_TOPIC:
         try:
+            hdrs = {
+                "Title":    title,
+                "Priority": "high",
+                "Tags":     "calendar",
+                "Click":    "https://migri.vihta.com/public/migri/#/reservation",
+            }
+            if ntfy_id:
+                hdrs["X-ID"] = ntfy_id[:64]   # ntfy max ID length
             requests.post(
                 f"https://ntfy.sh/{NTFY_TOPIC}",
                 data=message.encode("utf-8"),
-                headers={
-                    "Title":    title,
-                    "Priority": "high",
-                    "Tags":     "calendar",
-                    "Click":    "https://migri.vihta.com/public/migri/#/reservation",
-                },
+                headers=hdrs,
                 timeout=5,
             )
         except Exception as e:
@@ -605,9 +614,40 @@ def main() -> None:
         time.sleep(CHECK_INTERVAL_SECONDS)
 
 
-if __name__ == "__main__":
+def run_once() -> None:
+    """Single-shot check for GitHub Actions. No loop, no state — ntfy X-ID handles dedup."""
+    log("INFO", "STARTUP", "Single-shot check (--once mode)")
+    http = requests.Session()
     try:
-        main()
-    except KeyboardInterrupt:
-        log("INFO", "STARTUP", "Crawler stopped by user")
-        sys.exit(0)
+        session_id = create_session(http)
+        log("INFO", "SESSION", f"Token acquired ({session_id[:8]}...)")
+    except Exception as e:
+        log("ERROR", "SESSION", f"Could not create session: {e}")
+        sys.exit(1)
+
+    try:
+        ranked = apply_filters(check_upcoming(http, session_id))
+    except Exception as e:
+        log("ERROR", "SCAN", f"Scan failed: {e}")
+        sys.exit(1)
+
+    if not ranked:
+        log("INFO", "CHECK", "No qualifying Malmi slots found")
+        return
+
+    for _, dt, office, dist in ranked:
+        key = slot_key(dt, office)
+        msg = f"{office} — {format_slot(dt)} (~{dist} km)"
+        log("INFO", "CHECK", f"Slot found: {msg}")
+        notify(NOTIFICATION_TITLE, msg, ntfy_id=key)
+
+
+if __name__ == "__main__":
+    if "--once" in sys.argv:
+        run_once()
+    else:
+        try:
+            main()
+        except KeyboardInterrupt:
+            log("INFO", "STARTUP", "Crawler stopped by user")
+            sys.exit(0)
