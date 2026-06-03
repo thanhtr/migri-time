@@ -124,33 +124,34 @@ def notify(
     ntfy_id is used as X-ID for deduplication — same ID won't re-notify within 24 h.
     """
     # macOS — terminal-notifier (clickable) or osascript fallback
-    if open_file and _terminal_notifier_available():
-        file_url = f"file://{os.path.abspath(open_file)}"
-        try:
-            subprocess.run(
-                [
-                    "terminal-notifier",
-                    "-title",   title,
-                    "-message", message,
-                    "-sound",   NOTIFICATION_SOUND,
-                    "-open",    file_url,
-                ],
-                timeout=5, check=False,
+    if sys.platform == "darwin":
+        if open_file and _terminal_notifier_available():
+            file_url = f"file://{os.path.abspath(open_file)}"
+            try:
+                subprocess.run(
+                    [
+                        "terminal-notifier",
+                        "-title",   title,
+                        "-message", message,
+                        "-sound",   NOTIFICATION_SOUND,
+                        "-open",    file_url,
+                    ],
+                    timeout=5, check=False,
+                )
+            except Exception as e:
+                log("WARN", "NOTIFY", f"terminal-notifier failed: {e}")
+        else:
+            safe_msg   = message.replace("\\", "\\\\").replace('"', '\\"')
+            safe_title = title.replace("\\", "\\\\").replace('"', '\\"')
+            script = (
+                f'display notification "{safe_msg}" '
+                f'with title "{safe_title}" '
+                f'sound name "{NOTIFICATION_SOUND}"'
             )
-        except Exception as e:
-            log("WARN", "NOTIFY", f"terminal-notifier failed: {e}")
-    else:
-        safe_msg   = message.replace("\\", "\\\\").replace('"', '\\"')
-        safe_title = title.replace("\\", "\\\\").replace('"', '\\"')
-        script = (
-            f'display notification "{safe_msg}" '
-            f'with title "{safe_title}" '
-            f'sound name "{NOTIFICATION_SOUND}"'
-        )
-        try:
-            subprocess.run(["osascript", "-e", script], timeout=5, check=False)
-        except Exception as e:
-            log("WARN", "NOTIFY", f"osascript failed: {e}")
+            try:
+                subprocess.run(["osascript", "-e", script], timeout=5, check=False)
+            except Exception as e:
+                log("WARN", "NOTIFY", f"osascript failed: {e}")
 
     # Phone push via ntfy.sh (always fires)
     if NTFY_TOPIC:
