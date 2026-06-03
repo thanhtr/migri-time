@@ -68,7 +68,7 @@ FILTER_BEFORE_DATE      = datetime.date(2026, 7, 7) # exclusive upper bound
 
 NOTIFICATION_TITLE = "Migri Citizenship Appointment"
 NOTIFICATION_SOUND = "Glass"
-NTFY_TOPIC         = os.environ.get("NTFY_TOPIC", "migri-tung-7x4k")
+NTFY_TOPIC         = os.environ.get("NTFY_TOPIC") or "migri-tung-7x4k"
 
 BASE_HEADERS = {
     "User-Agent": (
